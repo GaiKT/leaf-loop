@@ -39,7 +39,21 @@ services:
       AUTH_SECRET: ${AUTH_SECRET:?set AUTH_SECRET in .env}
       AUTH_TRUST_HOST: "true"
     ports:
-      - "${APP_PORT:-3000}:3000"
+      # APP_BIND=127.0.0.1 keeps the app off the farm network, e.g. when it is reached only through the tunnel.
+      - "${APP_BIND:-0.0.0.0}:${APP_PORT:-3000}:3000"
+    networks: [internal]
+
+  # Optional: reaches the app from outside through a Cloudflare Tunnel, with no router port opened.
+  # Start it with `docker compose --profile tunnel up -d`. Setup is in README.md.
+  tunnel:
+    image: cloudflare/cloudflared:2026.9.3
+    profiles: ["tunnel"]
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
+    depends_on:
+      - app
     networks: [internal]
 
   # Dumps the database once a day into ./backups and keeps the last BACKUP_KEEP_DAYS days.

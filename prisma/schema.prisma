@@ -131,3 +131,11 @@ model Placement {
   @@index([batchId])
   @@index([tableId])
 }
+
+// Failed-login counters for brute-force protection. `key` is "ip:<address>" or "user:<username>". See login-throttle.ts.
+model LoginAttempt {
+  key         String    @id
+  failures    Int
+  windowStart DateTime
+  lockedUntil DateTime?
+}

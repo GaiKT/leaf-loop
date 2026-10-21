@@ -35,6 +35,10 @@ export async function login(_state: FormState, formData: FormData): Promise<Form
     await signIn("credentials", { username, password, redirectTo: "/" });
   } catch (error) {
     if (error instanceof AuthError) {
+      const locked = /^locked-(\d+)$/.exec((error as { code?: string }).code ?? "");
+      if (locked) {
+        return { message: `ใส่รหัสผิดหลายครั้ง รออีก ${locked[1]} นาทีแล้วลองใหม่`, values: { username } };
+      }
       return { message: "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง", values: { username } };
     }
     throw error; // the redirect on success is thrown and must propagate
