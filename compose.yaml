@@ -1,0 +1,87 @@
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: hydro
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: hydro
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hydro -d hydro"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [internal]
+
+  migrate:
+    build:
+      context: .
+      target: migrate
+    environment:
+      DATABASE_URL: postgresql://hydro:${POSTGRES_PASSWORD}@db:5432/hydro
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [internal]
+
+  app:
+    build:
+      context: .
+      target: runner
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql://hydro:${POSTGRES_PASSWORD}@db:5432/hydro
+      AUTH_SECRET: ${AUTH_SECRET:?set AUTH_SECRET in .env}
+      AUTH_TRUST_HOST: "true"
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    networks: [internal]
+
+  # Dumps the database once a day into ./backups and keeps the last BACKUP_KEEP_DAYS days.
+  # Files are named hydro-YYYY-MM-DD-HHMMSS.dump and are never overwritten, so a dump taken after the database
+  # was lost (and is empty) cannot replace a good one from earlier the same day. A dump is written to a
+  # temporary name first so a failed one never leaves a broken file. Restore steps are in README.md.
+  backup:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGUSER: hydro
+      PGDATABASE: hydro
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+    volumes:
+      - ${BACKUP_DIR:-./backups}:/backups
+    networks: [internal]
+    entrypoint:
+      - sh
+      - -c
+      - |
+        while true; do
+          name="hydro-$$(date +%F-%H%M%S).dump"
+          if pg_dump --format=custom --file=/backups/.running.dump; then
+            # mv -n never replaces an existing file, so a good backup can not be overwritten.
+            mv -n /backups/.running.dump "/backups/$$name"
+            rm -f /backups/.running.dump
+            echo "backup written: $$name"
+          else
+            rm -f /backups/.running.dump
+            echo "backup FAILED" >&2
+          fi
+          find /backups -name 'hydro-*.dump' -mtime +"$$KEEP_DAYS" -delete
+          sleep 86400
+        done
+
+networks:
+  internal:
+
+volumes:
+  dbdata:

@@ -1,0 +1,5 @@
+# Local development only: publish Postgres on loopback so `next dev` can reach it.
+services:
+  db:
+    ports:
+      - "127.0.0.1:5432:5432"

@@ -1,0 +1,133 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Farm {
+  id             String    @id @default(cuid())
+  name           String
+  // 0 = Sunday ... 6 = Saturday
+  harvestWeekday Int       @default(1)
+  createdAt      DateTime  @default(now())
+  growers        Grower[]
+  varieties      Variety[]
+  tables         Table[]
+}
+
+model Grower {
+  id                 String   @id @default(cuid())
+  farmId             String
+  farm               Farm     @relation(fields: [farmId], references: [id])
+  username           String   @unique
+  passwordHash       String
+  mustChangePassword Boolean  @default(false)
+  createdAt          DateTime @default(now())
+}
+
+model Variety {
+  id              String   @id @default(cuid())
+  farmId          String
+  farm            Farm     @relation(fields: [farmId], references: [id])
+  name            String
+  germinationDays Int
+  nurseryDays     Int
+  growOutDays     Int
+  // 1-100
+  survivalPercent Int
+  gramsPerPlant   Int
+  createdAt       DateTime @default(now())
+
+  targets      HarvestTarget[]
+  skippedWeeks SkippedWeek[]
+  batches      Batch[]
+
+  @@unique([farmId, name])
+}
+
+model Table {
+  id        String   @id @default(cuid())
+  farmId    String
+  farm      Farm     @relation(fields: [farmId], references: [id])
+  name      String
+  slotCount Int
+  createdAt DateTime @default(now())
+
+  placements Placement[]
+
+  @@unique([farmId, name])
+}
+
+// From effectiveWeek (always a Monday) onward the Variety is planned for kgPerWeek. 0 stops it.
+model HarvestTarget {
+  id            String   @id @default(cuid())
+  varietyId     String
+  variety       Variety  @relation(fields: [varietyId], references: [id], onDelete: Cascade)
+  effectiveWeek DateTime @db.Date
+  kgPerWeek     Decimal  @db.Decimal(8, 3)
+  createdAt     DateTime @default(now())
+
+  @@unique([varietyId, effectiveWeek])
+}
+
+// A week (its Monday) in which a Variety is deliberately not planned.
+model SkippedWeek {
+  id        String   @id @default(cuid())
+  varietyId String
+  variety   Variety  @relation(fields: [varietyId], references: [id], onDelete: Cascade)
+  week      DateTime @db.Date
+  createdAt DateTime @default(now())
+
+  @@unique([varietyId, week])
+}
+
+enum BatchStatus {
+  ACTIVE
+  CLOSED
+}
+
+// A group of plants of one Variety sown on the same day. Only real (sown) Batches are stored; Planned
+// Batches are derived from the Harvest Targets (ADR-0001). The Variety's values are copied at Sow so that
+// editing the Variety later does not move the dates of a crop that is already growing.
+model Batch {
+  id               String      @id @default(cuid())
+  varietyId        String
+  variety          Variety     @relation(fields: [varietyId], references: [id])
+  harvestWeek      DateTime    @db.Date
+  sowDate          DateTime    @db.Date
+  sownCount        Int
+  // Seedlings kept in the nursery after a partial transplant. null = nothing transplanted yet.
+  nurseryRemaining Int?
+  placements       Placement[]
+  status           BatchStatus @default(ACTIVE)
+  germinationDays  Int
+  nurseryDays      Int
+  growOutDays      Int
+  survivalPercent  Int
+  gramsPerPlant    Int
+  createdAt        DateTime    @default(now())
+
+  @@unique([varietyId, harvestWeek])
+}
+
+// Part of a Batch transplanted onto one Table. It occupies its Slots until it is harvested.
+// tableName is copied so the history stays readable after a Table is removed (tableId is then null).
+model Placement {
+  id             String    @id @default(cuid())
+  batchId        String
+  batch          Batch     @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  tableId        String?
+  table          Table?    @relation(fields: [tableId], references: [id], onDelete: SetNull)
+  tableName      String
+  transplantDate DateTime  @db.Date
+  plantCount     Int
+  harvestDate    DateTime? @db.Date
+  harvestKg      Decimal?  @db.Decimal(8, 3)
+  createdAt      DateTime  @default(now())
+
+  @@index([batchId])
+  @@index([tableId])
+}
